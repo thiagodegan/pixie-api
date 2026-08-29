@@ -1,0 +1,12 @@
+node_modules
+dist
+.env
+.env.local
+*.log
+.DS_Store
+
+# Certificados: nunca versionados. O material mTLS vive cifrado no banco.
+*.crt
+*.key
+*.pem
+*.p12

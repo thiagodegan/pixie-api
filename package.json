@@ -1,0 +1,38 @@
+{
+  "name": "pixie-api",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
+    "build": "tsc -b",
+    "start": "node dist/src/index.js",
+    "seed": "tsx --env-file-if-exists=.env prisma/seed.ts",
+    "test": "node --test --import tsx test/*.test.ts",
+    "prisma": "prisma"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/cors": "^11.1.0",
+    "@fastify/jwt": "^10.2.2",
+    "@fastify/multipart": "^9.2.1",
+    "@fastify/rate-limit": "^10.3.0",
+    "@node-rs/argon2": "^2.0.2",
+    "@prisma/client": "^6.19.0",
+    "fastify": "^5.6.1",
+    "fastify-plugin": "^6.0.0",
+    "prisma": "^6.19.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "tsx": "^4.20.6",
+    "typescript": "~5.9.3"
+  },
+  "allowScripts": {
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "esbuild@0.28.2": true,
+    "prisma@6.19.3": true
+  }
+}

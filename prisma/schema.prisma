@@ -1,0 +1,251 @@
+// ---------------------------------------------------------------------------
+// Pixie (PixFree) — modelo de dados
+//
+// Regra transversal: todo valor monetário é INTEIRO em CENTAVOS.
+// Nenhum float toca dinheiro em lugar nenhum deste schema.
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+
+  // Targets explícitos em vez de só "native": o engine é um binário nativo e
+  // precisa casar com arquitetura + versão do OpenSSL do contêiner que roda,
+  // e não da máquina que buildou. Os dois targets Debian cobrem as instâncias
+  // ARM (Ampere) e x86 da OCI; "native" mantém o dev local funcionando.
+  binaryTargets = ["native", "linux-arm64-openssl-3.0.x", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PixKeyType {
+  CNPJ
+  CPF
+  EMAIL
+  TELEFONE
+  ALEATORIA
+}
+
+enum PdvStatus {
+  ATIVO
+  PENDENTE
+  INATIVO
+}
+
+enum CertificateKind {
+  CRT
+  KEY
+}
+
+enum ChargeStatus {
+  AGUARDANDO
+  PAGO
+  EXPIRADO
+  CANCELADO
+  REVISAO // candidato ambíguo no extrato — exige conferência humana
+}
+
+// ---------------------------------------------------------------------------
+// Conta (tenant). Todo dado do sistema pendura aqui.
+// ---------------------------------------------------------------------------
+
+model Account {
+  id           String     @id @default(uuid()) @db.Uuid
+  name         String
+  email        String     @unique
+  passwordHash String
+  pixKeyType   PixKeyType @default(CNPJ)
+  pixKey       String?
+
+  /// Até onde o extrato já foi lido. O worker retoma daqui.
+  statementCursor DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pdvs              Pdv[]
+  certificates      Certificate[]
+  charges           Charge[]
+  transactions      BankTransaction[]
+  connectionLogs    ConnectionLog[]
+  pollingRuns       PollingRun[]
+  simulatedPayments SimulatedPayment[]
+
+  @@map("accounts")
+}
+
+// ---------------------------------------------------------------------------
+// Certificados mTLS. Credencial bancária: cifrado em repouso (AES-256-GCM),
+// nunca devolvido pela API — só metadados.
+// ---------------------------------------------------------------------------
+
+model Certificate {
+  id         String          @id @default(uuid()) @db.Uuid
+  accountId  String          @db.Uuid
+  account    Account         @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  kind       CertificateKind
+  filename   String
+  cipherText Bytes
+  iv         Bytes
+  authTag    Bytes
+  uploadedAt DateTime        @default(now())
+
+  @@unique([accountId, kind])
+  @@map("certificates")
+}
+
+// ---------------------------------------------------------------------------
+// PDV (ponto de venda).
+//
+// O código de acesso é REVERSÍVEL, não hash: o painel do dono precisa revelá-lo
+// (CodeReveal). Guardamos cifrado para exibir + um HMAC único para o login do
+// vendedor achar a linha em tempo constante.
+//
+// accessCodeLookup é @unique GLOBALMENTE: o vendedor manda só 6 dígitos, sem
+// nenhum contexto de conta, então a unicidade não pode ser por tenant.
+// ---------------------------------------------------------------------------
+
+model Pdv {
+  id        String  @id @default(uuid()) @db.Uuid
+  accountId String  @db.Uuid
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  name   String
+  prefix String
+
+  accessCodeEnc    Bytes
+  accessCodeIv     Bytes
+  accessCodeTag    Bytes
+  accessCodeLookup String @unique
+
+  status    PdvStatus @default(PENDENTE)
+  createdAt DateTime  @default(now())
+
+  charges Charge[]
+
+  @@unique([accountId, prefix])
+  @@map("pdvs")
+}
+
+// ---------------------------------------------------------------------------
+// Cobrança: um QR estático gerado para um valor. O txid é o elo com o extrato.
+// ---------------------------------------------------------------------------
+
+model Charge {
+  id        String  @id @default(uuid()) @db.Uuid
+  accountId String  @db.Uuid
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  pdvId     String  @db.Uuid
+  pdv       Pdv     @relation(fields: [pdvId], references: [id], onDelete: Cascade)
+
+  /// Unique global — é o identificador que precisa voltar íntegro do extrato.
+  txid        String       @unique
+  amountCents Int
+  status      ChargeStatus @default(AGUARDANDO)
+  /// BR Code EMV (Pix Copia e Cola) gerado no servidor.
+  pixPayload  String
+
+  payerName String?
+
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  paidAt    DateTime?
+
+  matchedTransactionId String?          @unique @db.Uuid
+  matchedTransaction   BankTransaction? @relation(fields: [matchedTransactionId], references: [id])
+
+  @@index([pdvId, status])
+  @@index([accountId, createdAt])
+  @@index([status, expiresAt])
+  @@map("charges")
+}
+
+// ---------------------------------------------------------------------------
+// Linha do extrato bancário, já ingerida. externalId dá idempotência: o worker
+// relê janelas sobrepostas e não pode duplicar.
+// ---------------------------------------------------------------------------
+
+model BankTransaction {
+  id        String  @id @default(uuid()) @db.Uuid
+  accountId String  @db.Uuid
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  externalId     String
+  amountCents    Int
+  payerName      String?
+  payerDocument  String?
+  rawDescription String
+  /// txid extraído da descrição, quando legível.
+  extractedTxid  String?
+
+  occurredAt DateTime
+  ingestedAt DateTime @default(now())
+
+  charge Charge?
+
+  @@unique([accountId, externalId])
+  @@index([accountId, occurredAt])
+  @@index([extractedTxid])
+  @@map("bank_transactions")
+}
+
+// ---------------------------------------------------------------------------
+// Log do terminal de diagnóstico (tela de Segurança e conexão).
+// ---------------------------------------------------------------------------
+
+model ConnectionLog {
+  id        Int      @id @default(autoincrement())
+  accountId String   @db.Uuid
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  at        DateTime @default(now())
+  message   String
+  ok        Boolean
+
+  @@index([accountId, at])
+  @@map("connection_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Auditoria de cada volta do worker. Instrumenta o risco de rate limit da API
+// de extrato antes que ele vire problema em produção.
+// ---------------------------------------------------------------------------
+
+model PollingRun {
+  id        Int      @id @default(autoincrement())
+  accountId String   @db.Uuid
+  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  fetched    Int       @default(0)
+  ingested   Int       @default(0)
+  matched    Int       @default(0)
+  error      String?
+
+  @@index([accountId, startedAt])
+  @@map("polling_runs")
+}
+
+// ---------------------------------------------------------------------------
+// Pagamento injetado no simulador de extrato (só fora de produção).
+// Fica no banco, e não em memória, para ser determinístico e inspecionável.
+// ---------------------------------------------------------------------------
+
+model SimulatedPayment {
+  id        String  @id @default(uuid()) @db.Uuid
+  accountId String  @db.Uuid
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  txid        String
+  amountCents Int
+  payerName   String
+  description String
+  /// Quando esta linha passa a "aparecer" no extrato.
+  availableAt DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@index([accountId, availableAt])
+  @@map("simulated_payments")
+}
