@@ -213,9 +213,9 @@ model ConnectionLog {
 // ---------------------------------------------------------------------------
 
 model PollingRun {
-  id        Int      @id @default(autoincrement())
-  accountId String   @db.Uuid
-  account   Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  id        Int     @id @default(autoincrement())
+  accountId String  @db.Uuid
+  account   Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   startedAt  DateTime  @default(now())
   finishedAt DateTime?
