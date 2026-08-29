@@ -10,3 +10,6 @@ dist
 *.key
 *.pem
 *.p12
+
+# Perfis do Chrome criados pelas configs de debug do VS Code
+.vscode/.chrome*

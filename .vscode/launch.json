@@ -1,0 +1,58 @@
+{
+  // Debug quando você abre SÓ o pixie-api no VS Code.
+  // Abrindo a pasta pixie/ (com os três repos), use o launch.json de lá.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Padrão do F5: roda a API neste processo, com o banco vindo do Docker.
+      "name": "API: executar local",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      // tsx roda o servidor num processo filho; sem isto os breakpoints não
+      // seriam vinculados.
+      "autoAttachChildProcesses": true,
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "preLaunchTask": "api: só o banco"
+    },
+    {
+      // Para quando a API já está rodando no contêiner (docker compose up).
+      "name": "API: anexar ao contêiner",
+      "type": "node",
+      "request": "attach",
+      "port": 9229,
+      "address": "127.0.0.1",
+      "restart": { "delay": 400, "maxAttempts": 30 },
+      "localRoot": "${workspaceFolder}",
+      "remoteRoot": "/app",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "sourceMaps": true
+    },
+    {
+      "name": "API: depurar os testes",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["test"],
+      "autoAttachChildProcesses": true,
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"]
+    },
+    {
+      "name": "API: depurar o seed",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "seed"],
+      "autoAttachChildProcesses": true,
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**", "**/node_modules/**"],
+      "preLaunchTask": "api: só o banco"
+    }
+  ]
+}
