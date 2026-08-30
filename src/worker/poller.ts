@@ -198,6 +198,8 @@ async function matchPending(
         paidAt: tx.occurredAt,
         payerName: tx.payerName,
         matchedTransactionId: tx.id,
+        // Marca a procedência: esta veio do extrato, não de uma baixa manual.
+        confirmationSource: "EXTRATO",
       },
     });
     await prisma.bankTransaction.update({

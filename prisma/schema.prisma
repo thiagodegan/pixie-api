@@ -39,6 +39,18 @@ enum CertificateKind {
   KEY
 }
 
+/**
+ * De onde veio a confirmação de um pagamento.
+ *
+ * Existe para que uma baixa manual NUNCA se confunda com uma conciliada pelo
+ * extrato. A manual é uma saída de emergência (banco fora do ar, txid ilegível)
+ * e carrega o risco de estar errada — o relatório precisa poder separar as duas.
+ */
+enum ConfirmationSource {
+  EXTRATO
+  MANUAL
+}
+
 enum ChargeStatus {
   AGUARDANDO
   PAGO
@@ -148,6 +160,13 @@ model Charge {
   pixPayload  String
 
   payerName String?
+
+  /// Preenchido junto com o PAGO. Null enquanto a cobrança está aberta.
+  confirmationSource ConfirmationSource?
+  /// Justificativa obrigatória da baixa manual — é o registro de auditoria.
+  manualNote         String?
+  /// E-mail de quem deu a baixa manual.
+  manualConfirmedBy  String?
 
   createdAt DateTime  @default(now())
   expiresAt DateTime

@@ -15,6 +15,7 @@ import { dashboardRoutes } from "./modules/dashboard/routes.js";
 import { devRoutes } from "./modules/dev/routes.js";
 import { pdvAuthRoutes, pdvSessionRoutes } from "./modules/pdv/routes.js";
 import { pdvRoutes } from "./modules/pdvs/routes.js";
+import { receiptRoutes } from "./modules/receipts/routes.js";
 
 export async function buildServer(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -105,6 +106,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(accountRoutes);
   await app.register(pdvRoutes);
   await app.register(dashboardRoutes);
+  await app.register(receiptRoutes);
   await app.register(pdvSessionRoutes);
   await app.register(chargeRoutes);
 
