@@ -4,7 +4,7 @@ import fastifyRateLimit from "@fastify/rate-limit";
 import { Prisma } from "@prisma/client";
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import { ZodError } from "zod";
-import { config, isProduction } from "./config.js";
+import { config, isProduction, trustProxy } from "./config.js";
 import { AppError } from "./lib/errors.js";
 import authPlugin from "./plugins/auth.js";
 import prismaPlugin from "./plugins/prisma.js";
@@ -28,7 +28,10 @@ export async function buildServer(): Promise<FastifyInstance> {
         "req.body.code",
       ],
     },
-    trustProxy: true,
+    // Só confia em X-Forwarded-For de quem TRUST_PROXY autorizar. Com `true`,
+    // qualquer cliente forjaria o próprio IP e escaparia dos limites de
+    // tentativa — inclusive o do código de 6 dígitos do PDV.
+    trustProxy,
   });
 
   // --- Infra ----------------------------------------------------------------

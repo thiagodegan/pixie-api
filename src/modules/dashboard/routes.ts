@@ -20,13 +20,23 @@ export async function dashboardRoutes(app: FastifyInstance) {
   app.get("/dashboard/summary", async (req) => {
     const accountId = req.owner.accountId;
 
-    const [pdvs, totals] = await Promise.all([
+    const [pdvs, totals, account] = await Promise.all([
       app.prisma.pdv.findMany({
         where: { accountId },
         orderBy: { createdAt: "asc" },
         select: { id: true, name: true, prefix: true, status: true },
       }),
       pdvTotals(app.prisma, accountId),
+      // Uma conta recém-criada não tem chave Pix nem certificados, e sem chave
+      // toda cobrança falha. O painel precisa saber disso para orientar em vez
+      // de deixar o dono descobrir no balcão.
+      app.prisma.account.findUniqueOrThrow({
+        where: { id: accountId },
+        select: {
+          pixKey: true,
+          _count: { select: { certificates: true } },
+        },
+      }),
     ]);
 
     const rows = pdvs.map((pdv) => ({
@@ -47,6 +57,12 @@ export async function dashboardRoutes(app: FastifyInstance) {
       activePdvs: rows.filter((r) => r.status === "ATIVO").length,
       totalPdvs: rows.length,
       pdvs: rows,
+      setup: {
+        pixKeyConfigured: Boolean(account.pixKey),
+        // O par .crt + .key: um só não fecha o handshake mTLS.
+        certificatesConfigured: account._count.certificates >= 2,
+        hasPdv: rows.length > 0,
+      },
     };
   });
 }
