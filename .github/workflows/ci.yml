@@ -1,0 +1,95 @@
+# ---------------------------------------------------------------------------
+# CI/CD do pixie-api.
+#
+# Em PR: só valida. Em push na main: valida, publica a imagem arm64 no OCIR e
+# pede ao pixie-infra que atualize APENAS o serviço `api` na VM.
+# ---------------------------------------------------------------------------
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # O client precisa existir antes do tsc: os tipos do Prisma são gerados.
+      - run: npx prisma generate
+      - run: npx tsc --noEmit
+      - run: npm test
+        env:
+          # A suíte é de unidade (EMV e matcher) e não abre conexão; estes
+          # valores só satisfazem a validação de env do boot.
+          DATABASE_URL: postgresql://x:x@localhost:5432/x
+          JWT_SECRET: 0123456789012345678901234567890123456789
+          ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+          ACCESS_CODE_PEPPER: "0123456789abcdef"
+
+  publicar:
+    needs: verificar
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: meta
+        run: echo "tag=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      # A VM always-free que vale a pena é Ampere (arm64) e o runner é x86.
+      # Sem o QEMU aqui, a imagem sai amd64 e não executa lá.
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.OCIR_REGISTRY }}
+          # <namespace>/<usuario>; em tenancy federada:
+          # <namespace>/oracleidentitycloudservice/<usuario>
+          username: ${{ secrets.OCIR_USERNAME }}
+          # Auth Token da OCI, não a senha do console.
+          password: ${{ secrets.OCIR_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ vars.OCIR_REGISTRY }}/${{ vars.OCI_NAMESPACE }}/pixie-api:${{ steps.meta.outputs.tag }}
+            ${{ vars.OCIR_REGISTRY }}/${{ vars.OCI_NAMESPACE }}/pixie-api:latest
+          # O build emulado é lento; o cache do Actions corta boa parte disso.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  implantar:
+    needs: publicar
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pedir deploy ao pixie-infra
+        # PAT com escopo de escrita apenas no pixie-infra.
+        run: |
+          curl -fsSL -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.INFRA_DISPATCH_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository_owner }}/pixie-infra/dispatches \
+            -d '{"event_type":"deploy","client_payload":{"service":"api","tag":"${{ needs.publicar.outputs.tag }}"}}'
